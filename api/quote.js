@@ -5,19 +5,21 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
 
   const MODEL_PRIORITY = [
-    'gemma-3-27b-it',       // text only
-    'gemma-3-12b-it',       // text only
-    'gemini-2.0-flash',     // JSON
-    'gemini-2.5-flash-lite' // JSON
+    'gemma-3-27b-it',
+    'gemma-3-12b-it',
+    'gemini-2.0-flash',
+    'gemini-2.5-flash-lite'
   ];
 
-  // Words/phrases we never want in the quote
-  const BAD_WORDS = ['okay', 'here', 'new', "here's an inspirational quote"];
+  // We will completely ignore any text that is not in this pattern:
+  // <quote>Some quote text
+  // <author>Author Name
+  const QUOTE_BLOCK_REGEX = /<quote>(.+?)\n<author>(.+?)(?:\n|$)/gis;
 
-  // Hard fallback if everything fails (clean, no markdown)
-  const CLEAN_FALLBACK = {
-    quote: 'The future belongs to those who believe in the beauty of their dreams.',
-    author: 'Eleanor Roosevelt'
+  // Last-resort fallback
+  const FALLBACK = {
+    quote: "The future belongs to those who believe in the beauty of their dreams.",
+    author: "Eleanor Roosevelt"
   };
 
   try {
@@ -31,37 +33,25 @@ export default async function handler(req, res) {
       try {
         console.log(`Trying quote model: ${model}`);
 
-        const isGeminiModel = model.startsWith('gemini');
-
-        const config = {
-          temperature: 0.4,  // lower temp for more deterministic output
-          maxOutputTokens: 80
-        };
-
-        if (isGeminiModel) {
-          // STRICT schema: exactly { quote: string, author: string }
-          config.responseMimeType = 'application/json';
-          config.responseSchema = {
-            type: 'object',
-            properties: {
-              quote: { type: 'string' },
-              author: { type: 'string' }
-            },
-            required: ['quote', 'author'],
-            additionalProperties: false
-          };
-        }
-
-        const systemInstruction = isGeminiModel
-          ? [
-              'You are a quote data API.',
-              'Return ONLY a JSON object matching the schema.',
-              'Fields:',
-              '- quote: a single inspirational quote sentence, no surrounding quotation marks, no markdown.',
-              '- author: only the plain author name, no markdown, no quote repeated.',
-              'Do NOT include any explanation, intro text, or formatting like ** or ```.'
-            ].join(' ')
-          : 'Data API. First line: quote only. Second line: author only. No intro, no commentary, no markdown.';
+        // Single, extremely strict instruction for ALL models
+        const systemInstruction = [
+          'You are a quote data API.',
+          'You MUST respond ONLY in this exact format, with no extra text before, between, or after blocks:',
+          '',
+          '<quote>Quote sentence 1',
+          '<author>Author Name 1',
+          '',
+          '<quote>Quote sentence 2',
+          '<author>Author Name 2',
+          '',
+          'Rules:',
+          '- Do NOT write any introductions like "Here is a quote" or "Okay, here\'s..."',
+          '- Do NOT add markdown, **, ``` or any other formatting.',
+          '- Do NOT wrap the quote in additional quotation marks unless they are part of the quote itself.',
+          '- Do NOT add bullets, numbering, or explanations.',
+          '- Each quote block MUST be exactly two lines: one <quote> line and one <author> line.',
+          '- You may return one or more such blocks, but nothing else.',
+        ].join('\n');
 
         const response = await ai.models.generateContent({
           model,
@@ -69,92 +59,80 @@ export default async function handler(req, res) {
           contents: [
             {
               role: 'user',
-              parts: [{ text: 'Return an inspirational quote and its author.' }]
+              parts: [
+                {
+                  text: 'Return exactly ONE inspirational quote and its author using the <quote> and <author> format described.'
+                }
+              ]
             }
           ],
-          config
+          config: {
+            temperature: 0.4,
+            maxOutputTokens: 120
+          }
         });
 
-        let rawQuote;
-        let rawAuthor;
+        const raw = (response.text || '').trim();
+        console.log(`Raw response from ${model}:\n${raw}`);
 
-        if (isGeminiModel) {
-          // JSON from Gemini; response.text must be a JSON string
-          const parsed = JSON.parse(response.text);
+        // Extract the first valid <quote>… <author>… block
+        const match = QUOTE_BLOCK_REGEX.exec(raw);
 
-          rawQuote = (parsed.quote || '').trim();
-          rawAuthor = (parsed.author || '').trim();
-        } else {
-          // Plain text from Gemma: line 1 = quote, line 2 = author
-          const lines = response.text
-            .trim()
-            .split('\n')
-            .map(l => l.trim())
-            .filter(Boolean);
-
-          rawQuote = (lines || '').trim();
-          rawAuthor = (lines[1] || '').trim();
+        if (!match) {
+          throw new Error('No <quote>/<author> block found');
         }
 
-        // 1) Strip quotes and markdown-style formatting
-        const cleanMarkdown = (s) =>
-          (s || '')
-            .replace(/^["'\s]+|["'\s]+$/g, '')   // outer quotes/spaces
+        let rawQuote = match.trim();[1]
+        let rawAuthor = match.trim();[2]
+
+        // Clean possible outer quotes and markdown
+        const clean = (s) =>
+          s
+            .replace(/^\s*["']+|\s*["']+$/g, '') // leading/trailing quotes
             .replace(/\*\*/g, '')               // remove bold markers
-            .replace(/`/g, '')                  // backticks
+            .replace(/`/g, '')                  // remove backticks
             .trim();
 
-        rawQuote = cleanMarkdown(rawQuote);
-        rawAuthor = cleanMarkdown(rawAuthor);
+        rawQuote = clean(rawQuote);
+        rawAuthor = clean(rawAuthor);
 
-        // 2) Strong intro detection
-        const lowerQuote = rawQuote.toLowerCase();
-        const looksLikeIntro =
-          lowerQuote.startsWith('okay') ||
-          lowerQuote.startsWith('ok,') ||
-          lowerQuote.includes("here's an inspirational quote") ||
-          lowerQuote.includes("here is an inspirational quote") ||
-          lowerQuote.includes('here is a quote') ||
-          lowerQuote.includes('here\'s a quote');
-
-        // 3) Validation rules
-        const valid =
-          rawQuote.length >= 15 &&
-          rawAuthor.length >= 3 &&
-          !BAD_WORDS.some(w => lowerQuote.includes(w)) &&
-          !looksLikeIntro;
-
-        if (!valid) {
-          throw new Error(`Validation failed: quote="${rawQuote}" author="${rawAuthor}"`);
+        // Basic sanity checks
+        if (rawQuote.length < 10) {
+          throw new Error(`Quote too short: "${rawQuote}"`);
+        }
+        if (rawAuthor.length < 2) {
+          throw new Error(`Author too short: "${rawAuthor}"`);
         }
 
         quote = rawQuote;
         author = rawAuthor;
         usedModel = model;
-        console.log(`✅ Quote success: ${model} -> "${quote}" — ${author}`);
+
+        console.log(`✅ Parsed quote from ${model}: "${quote}" — ${author}`);
         break;
       } catch (error) {
         const msg = String(error.message || error);
         const isQuotaError = msg.includes('429') || msg.toLowerCase().includes('quota');
-        const isJsonError = msg.includes('JSON mode');
 
         console.error(
           `❌ Quote ${model}:`,
-          isQuotaError ? 'QUOTA - skip'
-          : isJsonError ? 'JSON UNSUPPORTED - skip'
-          : msg
+          isQuotaError ? 'QUOTA - skip' : msg
         );
+        if (isQuotaError) {
+          // Move on to the next model
+          continue;
+        }
+        // For non-quota errors, also continue to next model
         continue;
       }
     }
 
-    // If all models failed OR quota hit on Gemini, we still return a clean structure
     if (!quote || !author) {
-      console.error('All models failed, returning CLEAN_FALLBACK');
+      console.error('All models failed, using FALLBACK');
       return res.status(200).json({
         type: 'quote',
-        quote: CLEAN_FALLBACK.quote,
-        author: CLEAN_FALLBACK.author,
+        quote: FALLBACK.quote,
+        author: FALLBACK.author,
         source: 'fallback'
       });
     }
@@ -166,11 +144,11 @@ export default async function handler(req, res) {
       model: usedModel
     });
   } catch (error) {
-    console.error('Quote top-level fallback:', error);
+    console.error('Quote top-level error:', error);
     return res.status(200).json({
       type: 'quote',
-      quote: CLEAN_FALLBACK.quote,
-      author: CLEAN_FALLBACK.author,
+      quote: FALLBACK.quote,
+      author: FALLBACK.author,
       source: 'fallback-top'
     });
   }
