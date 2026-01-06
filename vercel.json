@@ -1,8 +1,23 @@
 {
   "functions": {
     "api/**/*.js": {
-      "memory": 1024,
-      "maxDuration": 10
+      "memory": 2048,
+      "maxDuration": 15,
+      "runtime": "nodejs18.x"
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/index.js" },
+    { "source": "/api/quote", "destination": "/api/quote.js" },
+    { "source": "/api/greeting", "destination": "/api/greeting.js" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(quote|greeting)",
+      "headers": [
+        { "key": "Cache-Control", "value": "s-maxage=60, stale-while-revalidate" },
+        { "key": "X-API-Version", "value": "1.0.0" }
+      ]
+    }
+  ]
 }
