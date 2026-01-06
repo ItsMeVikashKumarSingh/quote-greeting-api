@@ -2,7 +2,6 @@
 import { GoogleGenAI } from '@google/genai';
 
 export default async function handler(req, res) {
-  // ESM doesn't need 'use strict' or specific wrapper logic for Vercel headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
@@ -14,22 +13,30 @@ export default async function handler(req, res) {
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // The new SDK method to list models
-    const response = await ai.models.list();
+    // In the new SDK, list() returns an async generator
+    const modelIterator = await ai.models.list();
     
-    const formattedModels = response.models.map(m => ({
-      id: m.name.replace('models/', ''),
-      name: m.displayName,
-      inputLimit: m.inputTokenLimit,
-      // Flash 3 and Pro 3 logic
-      isLatest: m.name.includes('gemini-3') || m.name.includes('2.5'),
-      capabilities: m.supportedGenerationMethods
-    }));
+    const allModels = [];
+
+    // Correct way to consume the list in @google/genai
+    for await (const m of modelIterator) {
+      allModels.push({
+        id: m.name.replace('models/', ''),
+        displayName: m.displayName,
+        inputLimit: m.inputTokenLimit,
+        outputLimit: m.outputTokenLimit,
+        // Check for Gemini 3 / 2.5 specific features
+        isLatest: m.name.includes('gemini-3') || m.name.includes('2.5'),
+        supportsThinking: m.thinking || false,
+        capabilities: m.supportedGenerationMethods || []
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
-      sdk: "Unified @google/genai",
-      models: formattedModels
+      sdk: "@google/genai (v1.34.0)",
+      total: allModels.length,
+      models: allModels
     });
 
   } catch (error) {
