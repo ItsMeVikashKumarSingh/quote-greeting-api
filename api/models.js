@@ -1,49 +1,73 @@
+// /api/models.js
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
-  
+
+  const apiKeyStatus = !!process.env.GEMINI_API_KEY ? 'valid' : 'missing';
+
+  if (apiKeyStatus === 'missing') {
+    return res.status(200).json({
+      status: 'no_api_key',
+      apiKeyStatus,
+      workingModels: [],
+      testedModels: [],
+      error: 'GEMINI_API_KEY is not set'
+    });
+  }
+
   try {
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    
-    // Test common models with try-catch
+
+    // Add/adjust models here as needed
     const testModels = [
       'gemini-2.5-flash',
+      'gemini-2.0-flash-exp',
       'gemini-1.5-flash',
-      'gemini-pro',
+      'gemini-1.5-flash-8b',
+      'gemini-pro',            // classic Gemini Pro
       'gemini-1.5-pro',
       'gemini-1.0-pro-vision-latest'
     ];
-    
+
     const workingModels = [];
-    
+    const failedModels = [];
+
     for (const modelName of testModels) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName });
-        // Test generation
+
+        // Minimal, cheap test prompt
         const result = await model.generateContent('test');
+        const text = result.response.text?.() || '';
+
         workingModels.push({
           name: modelName,
           status: 'working',
-          responseLength: result.response.text().length
+          responseLength: text.length
         });
-        break; // Found one working model
       } catch (error) {
-        console.log(`Model ${modelName}:`, error.message);
+        console.log(`Model ${modelName} failed:`, error.message);
+        failedModels.push({
+          name: modelName,
+          status: 'failed',
+          error: error.message
+        });
       }
     }
-    
-    res.status(200).json({
+
+    return res.status(200).json({
+      status: workingModels.length > 0 ? 'some_working' : 'no_models',
+      apiKeyStatus,
       workingModels,
-      testedModels: testModels,
-      status: workingModels.length > 0 ? 'ready' : 'no_models',
-      apiKeyStatus: !!process.env.GEMINI_API_KEY ? 'valid' : 'missing'
+      failedModels,
+      testedModels: testModels
     });
-    
   } catch (error) {
-    res.status(500).json({
-      error: error.message,
-      status: 'error'
+    return res.status(500).json({
+      status: 'error',
+      apiKeyStatus,
+      error: error.message
     });
   }
 }
