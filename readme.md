@@ -33,7 +33,7 @@ A serverless API built with Vercel Functions and Google Gemini AI that provides 
 **cURL Example**
 
 ```bash
-curl https://quote-greeting-api.vercel.app/api/generate-quote
+curl https://quote-greeting-api-ten.vercel.app/api/generate-quote
 ```
 
 ---
@@ -75,7 +75,7 @@ curl https://quote-greeting-api.vercel.app/api/generate-quote
 **cURL Example**
 
 ```bash
-curl -X POST https://quote-greeting-api.vercel.app/api/generate-greeting \
+curl -X POST https://quote-greeting-api-ten.vercel.app/api/generate-greeting \
   -H "Content-Type: application/json" \
   -d '{"greetingType": "evening", "history": ["Good Evening! Hope your day was great"]}'
 ```
@@ -215,4 +215,4 @@ Repository: [https://github.com/ItsMeVikashKumarSingh/quote-greeting-api](https:
 For issues or feature requests, open an issue here:
 [https://github.com/ItsMeVikashKumarSingh/quote-greeting-api/issues](https://github.com/ItsMeVikashKumarSingh/quote-greeting-api/issues)
 
-Live Demo: [https://quote-greeting-api.vercel.app](https://quote-greeting-api.vercel.app)
+Live Demo: [https://quote-greeting-api-ten.vercel.app](https://quote-greeting-api-ten.vercel.app)
