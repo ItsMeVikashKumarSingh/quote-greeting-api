@@ -4,8 +4,15 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  const MODEL_PRIORITY = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemma-3-27b-it', 'gemma-3-12b-it'];
-  const BAD_WORDS = ['okay', 'here', 'let', 'craft', 'bunch', 'few'];
+  // QUOTA-SAFE PRIORITY (Gemma first - your available quota)
+  const MODEL_PRIORITY = [
+    'gemma-3-27b-it',     // 131K available ✅
+    'gemma-3-12b-it',     // 32K available ✅
+    'gemini-2.0-flash',   // Lower usage
+    'gemini-2.5-flash-lite'  // Separate quota
+  ];
+
+  const BAD_WORDS = ['okay', 'here', 'let', 'craft'];
 
   try {
     const { greetingType = 'morning', history = [] } = req.body || {};
@@ -15,46 +22,44 @@ export default async function handler(req, res) {
 
     for (const model of MODEL_PRIORITY) {
       try {
+        console.log(`Trying greeting model: ${model}`);
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `You are not conversational. Data API only. Generate one ${greetingType} greeting sentence. No explanations.`,
-          contents: [{ role: 'user', parts: [{ text: `Single ${greetingType} greeting${history.length ? `. Avoid: ${history.slice(0,2).join(', ')}` : ''}` }] }],
+          systemInstruction: `Data API. No conversation. Single ${greetingType} greeting.`,
+          contents: [{ role: 'user', parts: [{ text: `${greetingType} greeting` }] }],
           config: { 
             temperature: 0.6,
-            maxOutputTokens: 30,
+            maxOutputTokens: 25,
             responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'object',
-              properties: { text: { type: 'string' } },
-              required: ['text']
-            }
+            responseSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] }
           }
         });
 
         const parsed = JSON.parse(response.text);
-        greeting = parsed.text.trim().replace(/[.!?]+$/, '');
+        greeting = parsed.text.trim();
 
-        // Validate
-        const lowerGreeting = greeting.toLowerCase();
-        if (greeting.length >= 8 && greeting.length <= 60 && 
-            !BAD_WORDS.some(w => lowerGreeting.includes(w)) &&
-            greeting.split(' ').length <= 10) {
+        if (greeting.length >= 8 && greeting.length <= 40 && 
+            !BAD_WORDS.some(w => greeting.toLowerCase().includes(w))) {
           usedModel = model;
+          console.log(`✅ Greeting success: ${model}`);
           break;
         }
-        throw new Error('Invalid format');
       } catch (error) {
-        console.error(`Greeting ${model}:`, error.message);
-        continue;
+        console.error(`❌ Greeting ${model}:`, error.message.includes('quota') ? 'QUOTA EXCEEDED' : error.message);
+        if (error.message.includes('429') || error.message.includes('quota')) continue;
+        throw error;  // Non-quota error = fatal
       }
     }
 
-    if (!greeting) throw new Error('All models failed');
-
-    return res.status(200).json({ type: 'greeting', greeting, greetingType, model: usedModel });
+    return res.status(200).json({ 
+      type: 'greeting', 
+      greeting: greeting || 'Good morning beautiful day', 
+      greetingType, 
+      model: usedModel || 'fallback' 
+    });
 
   } catch (error) {
-    console.error('Greeting fallback:', error);
-    res.status(200).json({ type: 'greeting', greeting: "Good morning sunshine", greetingType: 'morning', source: 'fallback' });
+    console.error('Greeting final error:', error);
+    res.status(200).json({ type: 'greeting', greeting: 'Good morning sunshine', greetingType: 'morning', source: 'fallback' });
   }
 }
