@@ -32,24 +32,19 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-pro',
-      generationConfig: {
-        temperature: 1.3,
-        topP: 0.9,
-        maxOutputTokens: 80
-      }
+      model: 'gemini-2.5-flash'
     });
 
     const historyText = history.slice(0, 5).join('; ') ? 
-      `Avoid similarity to previous: ${history.slice(0, 5).join('; ')}` : '';
+      `\nAVOID: ${history.slice(0, 5).join('; ')}` : '';
     
     const result = await model.generateContent({
       contents: [{
         role: 'user',
         parts: [{
-          text: `Generate unique ${greetingType} greeting. ${historyText}
+          text: `Generate unique ${greetingType} greeting.${historyText}
           
-Be creative, natural, 1-2 sentences max. Like: "Rise and shine!"`
+Be creative, natural, 1-2 sentences. Like: "Rise and shine! Wishing you success!"`
         }]
       }]
     });
@@ -61,8 +56,6 @@ Be creative, natural, 1-2 sentences max. Like: "Rise and shine!"`
       success: true,
       greeting,
       greetingType,
-      historyUsed: history.length,
-      tokensUsed: result.response.usageMetadata?.promptTokenCount || 0,
       timestamp: new Date().toISOString()
     });
     
@@ -70,9 +63,8 @@ Be creative, natural, 1-2 sentences max. Like: "Rise and shine!"`
     console.error('GREETING_ERROR:', error.message);
     res.status(200).json({
       success: false,
-      greeting: `Good ${greetingType}! Wishing you success!`,
+      greeting: `Good ${greetingType}! Have an amazing day!`,
       greetingType,
-      historyUsed: 0,
       timestamp: new Date().toISOString()
     });
   }

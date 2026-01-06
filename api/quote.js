@@ -17,22 +17,18 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-pro',
-      generationConfig: {
-        temperature: 0.8,
-        maxOutputTokens: 100
-      }
+      model: 'gemini-2.5-flash'
     });
 
     const result = await model.generateContent({
       contents: [{
         role: 'user',
         parts: [{
-          text: `Generate ONE inspirational quote EXACTLY like:
-<quote>"Don't cry because it's over, smile because it happened."
-<author>Dr. Seuss
+          text: `Generate ONE inspirational quote in this format:
+<quote>"Quote text here"
+<author>Author Name
 
-Return ONLY the formatted quote.`
+Return ONLY the quote.`
         }]
       }]
     });
@@ -42,6 +38,6 @@ Return ONLY the formatted quote.`
     
   } catch (error) {
     console.error('QUOTE_ERROR:', error.message);
-    res.status(200).send('<quote>"Production systems must always respond."\n<author>DevOps');
+    res.status(200).send('<quote>"The only way to do great work is to love what you do."\n<author>Steve Jobs');
   }
 }
