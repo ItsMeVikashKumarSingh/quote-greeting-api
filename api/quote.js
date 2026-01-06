@@ -11,9 +11,6 @@ export default async function handler(req, res) {
     'gemini-2.5-flash-lite'
   ];
 
-  // Pattern: <quote>...newline<author>...
-  const QUOTE_BLOCK_REGEX = /<quote>(.+?)\n<author>(.+?)(?:\n|$)/is;
-
   const FALLBACK = {
     quote: 'The future belongs to those who believe in the beauty of their dreams.',
     author: 'Eleanor Roosevelt'
@@ -34,14 +31,14 @@ export default async function handler(req, res) {
           'You are a quote data API.',
           'Respond ONLY in this exact pattern, no other text:',
           '',
-          '<quote>Quote sentence',
-          '<author>Author Name',
+          '<quote>Quote sentence</quote>',
+          '<author>Author Name</author>',
           '',
           'Rules:',
           '- No introduction such as "Here is a quote" or "Okay, here\'s...".',
           '- No markdown (** or ```).',
-          '- Exactly two lines per quote: one <quote>, one <author>.',
-          '- Return exactly ONE quote block.',
+          '- Exactly two lines: one <quote> line, one <author> line.',
+          '- Return exactly ONE quote block.'
         ].join('\n');
 
         const response = await ai.models.generateContent({
@@ -53,7 +50,7 @@ export default async function handler(req, res) {
               parts: [
                 {
                   text:
-                    'Return exactly ONE inspirational quote in the <quote>/<author> format.'
+                    'Return exactly ONE inspirational quote using the <quote>...</quote> and <author>...</author> tags.'
                 }
               ]
             }
@@ -64,17 +61,17 @@ export default async function handler(req, res) {
           }
         });
 
-  // SAFETY: handle different shapes of response
-let raw;
+        // SAFETY: handle different shapes of response
+      let raw;
 
 if (typeof response?.text === 'string') {
-  // Case 1: SDK exposes .text directly
+  // Case 1: SDK exposes the text directly on .text
   raw = response.text;
 } else if (
   Array.isArray(response?.candidates) &&
   response.candidates[0]?.content?.parts?.[0]?.text
 ) {
-  // Case 2: candidates[0].content.parts[0].text
+  // Case 2: text is in candidates[0].content.parts[0].text
   raw = response.candidates[0].content.parts[0].text;
 } else {
   throw new Error('No text in response');
@@ -84,19 +81,24 @@ raw = String(raw).trim();
 
         console.log(`Raw response from ${model}:\n${raw}`);
 
-        const match = raw.match(QUOTE_BLOCK_REGEX);
-        if (!match) {
-          throw new Error('No <quote>/<author> block found');
+        // Extract inner text between tags (matches your example exactly)
+        // <quote>The only way...</quote>
+        // <author>Steve Jobs</author>
+        const quoteMatch = raw.match(/<quote>([\s\S]*?)<\/quote>/i);
+        const authorMatch = raw.match(/<author>([\s\S]*?)<\/author>/i);
+
+        if (!quoteMatch || !authorMatch) {
+          throw new Error('No <quote> or <author> block found');
         }
 
-        let rawQuote = match;[1]
-        let rawAuthor = match;[2]
+        let rawQuote = quoteMatch;[1]
+        let rawAuthor = authorMatch;[1]
 
         const clean = (s) =>
           String(s || '')
-            .replace(/^\s*["']+|\s*["']+$/g, '') // trim outer quotes
-            .replace(/\*\*/g, '')               // remove **
-            .replace(/`/g, '')                  // remove backticks
+            .replace(/^\s*["']+|\s*["']+$/g, '') // outer quotes
+            .replace(/\*\*\s*/g, '')            // markdown bold
+            .replace(/`/g, '')                  // backticks
             .trim();
 
         rawQuote = clean(rawQuote);
