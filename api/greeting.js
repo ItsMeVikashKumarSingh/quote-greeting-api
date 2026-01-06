@@ -13,11 +13,6 @@ export default async function handler(req, res) {
     return;
   }
   
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'POST required' });
-    return;
-  }
-
   try {
     const bodyString = await new Promise((resolve) => {
       let data = '';
@@ -36,48 +31,89 @@ export default async function handler(req, res) {
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-2.5-flash',
       generationConfig: {
-        temperature: 1.1,
-        maxOutputTokens: 50,  // Limit for speed
-        topP: 0.9
+        temperature: 1.5,        // MAXIMUM creativity
+        topP: 0.95,
+        topK: 64,                // More token choices
+        maxOutputTokens: 80      // Enough for 2 sentences
       }
     });
 
+    // Dynamic prompt with examples for variety
+    const greetingExamples = {
+      morning: [
+        "Rise and shine! Wishing you an incredible day!",
+        "Good morning! May your coffee be strong and your day be amazing!",
+        "Morning sunshine! Hope you're ready to conquer the day!"
+      ],
+      evening: [
+        "Good evening! Hope your day was productive and fulfilling!",
+        "Evening vibes! Time to unwind and recharge for tomorrow.",
+        "As the day winds down, wishing you peaceful moments ahead!"
+      ],
+      night: [
+        "Good night! Sweet dreams and restful sleep!",
+        "Night night! Recharge well for tomorrow's adventures!",
+        "Time for stars and sleep! Sweet dreams!"
+      ],
+      afternoon: [
+        "Good afternoon! Powering through the day strong!",
+        "Afternoon boost! You've got this!",
+        "Happy afternoon! Keep shining!"
+      ]
+    };
+
+    const examples = greetingExamples[greetingType] || greetingExamples.morning;
     const historyText = history.length > 0 ? 
-      `\nAvoid similarity to: ${history.slice(-3).join('; ')}` : '';
+      `\nAVOID: ${history.slice(-3).join('; ')}` : '';
     
     const result = await model.generateContent({
       contents: [{
         role: 'user',
         parts: [{
-          text: `Generate ONE ${greetingType} greeting.${historyText}
+          text: `Generate ONE unique ${greetingType} greeting like these examples (but different):
+${examples.map(ex => `• ${ex}`).join('\n')}${historyText}
 
-CRITICAL RULES:
+STRICT RULES:
+- ONE greeting only
+- 8-20 words (full sentence)
+- Friendly, warm, natural tone
+- NO lists, numbers, bullets
+- NO "Here are", "Options", "Suggestions"
 - Return ONLY the greeting text
-- NO lists, NO options, NO numbering (1., 2., 3.)
-- NO markdown (* or -)
-- NO multiple greetings
-- 1-2 sentences maximum
-- Natural and friendly
 
-Example output:
-Good ${greetingType}! Wishing you a wonderful day ahead!
-
-Your single greeting:`
+Greeting:`
         }]
-      }]
+      }],
+      generationConfig: {
+        temperature: 1.5,
+        topP: 0.95,
+        topK: 64,
+        maxOutputTokens: 80
+      }
     });
 
     let greeting = result.response.text().trim();
     
-    // Clean up any formatting issues
+    // Aggressive cleaning
     greeting = greeting
-      .replace(/^["'`\n\r*-]+|["'`\n\r*-]+$/g, '')  // Remove quotes/bullets
-      .replace(/^\d+\.\s*/gm, '')  // Remove numbering
-      .replace(/^Here.*?:\s*/i, '')  // Remove "Here are" intros
-      .replace(/\n+/g, ' ')  // Single line
-      .replace(/\s{2,}/g, ' ')  // Clean spaces
-      .split(/\n|\*|•/)[0]  // Take only first line/option
+      .replace(/^["'`•*-]+|["'`•*-]+$/g, '')
+      .replace(/^(\d+\.|-|\*|\[.*?\]|\{.*?\})\s*/gm, '')
+      .replace(/^Here.*?:\s*/i, '')
+      .replace(/^Greeting:?\s*/i, '')
+      .replace(/\n+/g, ' ')
+      .split('.')[0]  // First sentence only
       .trim();
+
+    // Fallback if too short
+    if (greeting.length < 10) {
+      const fallbackGreetings = {
+        morning: "Good morning! Wishing you energy and success today!",
+        evening: "Good evening! Hope your day was amazing!",
+        night: "Good night! Sweet dreams and rest well!",
+        afternoon: "Good afternoon! Keep up the great work!"
+      };
+      greeting = fallbackGreetings[greetingType] || fallbackGreetings.morning;
+    }
 
     const responseTime = Date.now() - startTime;
 
@@ -86,22 +122,16 @@ Your single greeting:`
       greeting,
       greetingType,
       responseTime: `${responseTime}ms`,
+      wordCount: greeting.split(' ').length,
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
     console.error('GREETING_ERROR:', error.message);
-    const fallbacks = {
-      morning: 'Good morning! Wishing you a productive and energized day ahead!',
-      evening: 'Good evening! Hope your day was great and you enjoy a relaxing night!',
-      night: 'Good night! Sleep well and recharge for tomorrow!',
-      afternoon: 'Good afternoon! Hope your day is going wonderfully!'
-    };
-    
     res.status(200).json({
       success: false,
-      greeting: fallbacks[greetingType] || fallbacks.morning,
-      greetingType,
+      greeting: 'Hello! Have a wonderful day!',
+      greetingType: 'morning',
       responseTime: `${Date.now() - startTime}ms`,
       timestamp: new Date().toISOString()
     });
