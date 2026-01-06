@@ -1,7 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
 
-export const maxDuration = 30;
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
@@ -11,18 +9,21 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const response = await ai.models.generateContent({
-      model: 'gemma-3-12b-it', // Correct ID
-      systemInstruction: `Generate a beautiful ${wishType} wish. Avoid: [${history.join(', ')}]. Return only the wish string.`,
-      contents: [{ role: 'user', parts: [{ text: "Write the wish." }] }],
-      config: { temperature: 1.0, maxOutputTokens: 200 }
+      model: 'gemma-3-12b-it',
+      systemInstruction: `You are a direct Wish API. Do not ask for context. Simply generate a beautiful ${wishType} wish sentence. Return ONLY the wish text.`,
+      contents: [{ 
+        role: 'user', 
+        parts: [{ text: `Write a unique ${wishType} wish. Avoid: [${history.join(', ')}].` }] 
+      }],
+      config: { 
+        temperature: 1.4, 
+        maxOutputTokens: 100 
+      }
     });
 
-    return res.status(200).json({ 
-      type: 'wish', 
-      wish: response.text.trim().replace(/["]+/g, ''),
-      wishType
-    });
+    const wish = response.text.trim().replace(/["]+/g, '');
+    return res.status(200).json({ type: 'wish', wish, wishType, model: 'gemma-3-12b-it' });
   } catch (error) {
-    res.status(200).json({ wish: "Have an amazing day!", source: 'fallback' });
+    res.status(200).json({ wish: "May your day be filled with unexpected joy!", source: 'fallback' });
   }
 }
