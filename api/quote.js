@@ -6,42 +6,56 @@ export default async function handler(req, res) {
 
   const MODEL_PRIORITY = [
     'gemini-2.5-flash',
-    'gemini-2.5-pro', 
-    'gemma-3-27b-it',   // Your preferred large model
+    'gemini-2.5-pro',
+    'gemma-3-27b-it',
     'gemma-3-12b-it'
   ];
+
+  const BAD_PATTERNS = ['here', 'okay', 'new', 'inspirational', 'hope'];
 
   try {
     const { history = [] } = req.body || {};
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     let quote, author, usedModel;
-    
+
     for (const model of MODEL_PRIORITY) {
       try {
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `Quote API. Return ONE quote + author on new line. Avoid history: ${history.join('; ')}. No explanations.`,
-          contents: [{ role: 'user', parts: [{ text: 'New inspirational quote.' }] }],
-          config: { temperature: 1.2, topK: 50, maxOutputTokens: 300 }
+          systemInstruction: `QUOTE API. EXACT FORMAT:
+  "Quote text exactly like this"
+  Author Name
+  
+  NO intro. NO explain. NO emojis. NO formatting.`,
+          contents: [{ role: 'user', parts: [{ text: `Quote. Avoid: ${history.slice(0,3).join(';')}` }] }],
+          config: { temperature: 0.8, topK: 40, maxOutputTokens: 80 }
         });
 
         const lines = response.text.trim().split('\n').map(l => l.trim()).filter(Boolean);
-        if (lines.length >= 2) {
-          quote = lines[0].replace(/^["']|["']$/g, '');
-          author = lines.slice(1).join(' ');
+        quote = lines[0]?.replace(/^["'"]+|["'"]+$/g, '');
+        author = lines[1];
+
+        if (quote && author && quote.length >= 15 && quote.length <= 100 && 
+            !BAD_PATTERNS.some(p => quote.toLowerCase().includes(p))) {
           usedModel = model;
           break;
         }
+        throw new Error(`Quote failed: "${quote}"`);
       } catch (error) {
-        console.error(`Quote model ${model} failed:`, error.message);
+        console.error(`Quote ${model}:`, error.message);
         continue;
       }
     }
 
-    if (!quote) throw new Error('No valid quote generated');
+    if (!quote || !author) throw new Error('No valid quote');
 
-    return res.status(200).json({ type: 'quote', quote, author, model: usedModel });
+    return res.status(200).json({ 
+      type: 'quote', 
+      quote, 
+      author, 
+      model: usedModel 
+    });
 
   } catch (error) {
     console.error('Quote fallback:', error);

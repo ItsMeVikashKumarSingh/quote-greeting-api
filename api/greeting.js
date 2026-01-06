@@ -5,61 +5,67 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
 
   const MODEL_PRIORITY = [
-    'gemini-2.5-flash',    // Unlimited quota
-    'gemini-2.5-pro',      // High quality
-    'gemma-3-27b-it',      // Your large model (131K)
-    'gemma-3-12b-it'       // Reliable fallback (32K)
+    'gemini-2.5-flash',
+    'gemini-2.5-pro', 
+    'gemma-3-27b-it',
+    'gemma-3-12b-it'
   ];
+
+  const BAD_PATTERNS = ['here are', 'let', 'okay', 'craft', 'bunch', 'options', 'ranging', 'tone'];
 
   try {
     const { greetingType = 'morning', history = [] } = req.body || {};
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     let greeting, usedModel;
-    let lastError;
 
     for (const model of MODEL_PRIORITY) {
       try {
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `Greeting API. Return ONLY one ${greetingType} greeting. No lists. No colons. Avoid: ${history.join('; ')}.`,
-          contents: [{ role: 'user', parts: [{ text: `New ${greetingType} greeting.` }] }],
-          config: { temperature: 1.5, topP: 0.95, maxOutputTokens: 60 }
+          systemInstruction: `GREETING API. 5 WORDS MAX. ONLY: [${greetingType} greeting]. 
+          NO intro. NO lists. NO "here". NO "let". NO explain. NO punctuation after greeting.`,
+          contents: [{ role: 'user', parts: [{ text: `${greetingType} greeting. ${history.length ? `Avoid: ${history.slice(0,3).join(';')}` : ''}` }] }],
+          config: { temperature: 0.7, topP: 0.9, maxOutputTokens: 20 }
         });
 
-        greeting = response.text.trim().split('\n')[0].split('.')[0];
-        
-        if (greeting.length >= 8 && !greeting.includes(':') && !greeting.includes('here')) {
+        // Bulletproof parsing
+        greeting = response.text.trim()
+          .replace(/[.!?;,:\[\]"']/g, '')  // Strip all
+          .split('\n')[0]
+          .split(' ')
+          .slice(0, 8)
+          .join(' ');
+
+        // Strict validation
+        if (greeting.length >= 8 && greeting.length <= 50 && 
+            !BAD_PATTERNS.some(p => greeting.toLowerCase().includes(p))) {
           usedModel = model;
-          break;  // Success!
+          break;
         }
-        throw new Error('Format validation failed');
+        throw new Error(`Format failed: "${greeting}"`);
       } catch (error) {
-        lastError = error.message;
-        console.error(`Model ${model} failed:`, error.message);
-        continue;  // Try next model
+        console.error(`Greeting ${model}:`, error.message);
+        continue;
       }
     }
 
-    if (!greeting) {
-      throw new Error(`All models failed. Last error: ${lastError}`);
-    }
+    if (!greeting) throw new Error('All models failed validation');
 
     return res.status(200).json({ 
       type: 'greeting', 
       greeting, 
-      greetingType,
+      greetingType, 
       model: usedModel 
     });
 
   } catch (error) {
-    console.error('Greeting fallback:', error);
+    console.error('Greeting final fallback:', error);
     res.status(200).json({ 
       type: 'greeting', 
-      greeting: "Rise and shine! Have a great day.",
-      greetingType: 'morning',
-      source: 'fallback',
-      error: error.message 
+      greeting: "Good morning sunshine!", 
+      greetingType, 
+      source: 'fallback' 
     });
   }
 }
