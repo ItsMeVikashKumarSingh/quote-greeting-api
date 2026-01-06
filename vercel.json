@@ -3,13 +3,14 @@
   "functions": {
     "api/**/*.js": {
       "memory": 1024,
-      "maxDuration": 8
+      "maxDuration": 10
     }
   },
   "rewrites": [
-    { "source": "/api/greeting", "destination": "/api/greeting.js" },
-    { "source": "/api/wish", "destination": "/api/wish.js" },
-    { "source": "/api/quote", "destination": "/api/quote.js" },
-    { "source": "/api/health", "destination": "/api/health.js" }
+    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/api/quote", "destination": "/api/quote" },
+    { "source": "/api/greeting", "destination": "/api/greeting" },
+    { "source": "/api/wish", "destination": "/api/wish" },
+    { "source": "/api/models", "destination": "/api/models" }
   ]
 }
