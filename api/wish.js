@@ -1,108 +1,103 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+import { GoogleGenAI } from '@google/genai';
+
+// Model Priority: Try latest smart models first, fall back to the "Always Free" workhorse
+const MODEL_FALLBACKS = [
+  'gemini-3-flash-preview', // Tier 1: Best quality for wishes
+  'gemini-2.5-flash',       // Tier 2: Strong reasoning
+  'gemini-2.5-flash-lite'   // Tier 3: The Fallback - 1,000 req/day limit
+];
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
   
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'POST required' });
-    return;
+    return res.status(405).json({ error: 'POST required' });
   }
 
+  // Define fallbacks inside the handler for access to wishType
+  const wishFallbacks = {
+    day: ['Wishing you a productive day!', 'Have an amazing day!', 'Make today count!'],
+    evening: ['Enjoy your evening!', 'Peaceful evening ahead!', 'Relax and recharge!'],
+    night: ['Sweet dreams tonight!', 'Rest well tonight!', 'Goodnight wishes!'],
+    afternoon: ['Great afternoon ahead!', 'Power through afternoon!', 'Afternoon success!']
+  };
+
   try {
-    let bodyString = '';
-    req.on('data', chunk => bodyString += chunk);
-    
-    const body = await new Promise(resolve => {
-      req.on('end', () => {
-        try {
-          resolve(bodyString ? JSON.parse(bodyString) : {});
-        } catch {
-          resolve({});
-        }
-      });
-    });
+    // Modern Vercel Body Parsing
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
     
     const { wishType = 'day', history = [] } = body;
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) throw new Error('API_KEY_MISSING');
+
+    const ai = new GoogleGenAI({ apiKey });
+    const historyText = history.length ? `\nAvoid: ${history.slice(-3).join('; ')}` : '';
     
-    // QUOTA-PROOF FALLBACKS
-    const wishFallbacks = {
-      day: ['Wishing you a productive day!', 'Have an amazing day!', 'Make today count!'],
-      evening: ['Enjoy your evening!', 'Peaceful evening ahead!', 'Relax and recharge!'],
-      night: ['Sweet dreams tonight!', 'Rest well tonight!', 'Goodnight wishes!'],
-      afternoon: ['Great afternoon ahead!', 'Power through afternoon!', 'Afternoon success!']
-    };
-    
-    const fallback = wishFallbacks[wishType]?.[
-      Math.floor(Math.random() * wishFallbacks[wishType].length)
-    ] || 'Have a great day!';
-    
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(200).json({
-        type: 'wish',
-        wish: fallback,
-        wishType,
-        source: 'fallback',
-        timestamp: new Date().toISOString()
-      });
+    const prompt = `ONE ${wishType} wish (8-15 words):${historyText}
+    Examples: "Wishing you a productive day!", "May your evening bring peace!"
+    Wish:`;
+
+    let finalWish = '';
+    let usedModel = '';
+
+    // FALLBACK LOOP
+    for (const modelId of MODEL_FALLBACKS) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelId,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: { 
+            temperature: 1.3, 
+            maxOutputTokens: 50 
+          }
+        });
+
+        finalWish = response.text.trim()
+          .replace(/^["'`•*-]+|["'`•*-]+$/g, '')
+          .replace(/^\d+\.\s*/g, '')
+          .split('\n')[0]
+          .trim();
+        
+        usedModel = modelId;
+        break; // Exit loop on success
+      } catch (err) {
+        if (err.message.includes('429') || err.message.includes('Quota')) {
+          console.warn(`Fallback: ${modelId} limited. Trying next...`);
+          continue; 
+        }
+        throw err; // Real error, stop loop
+      }
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash-8b',  // UNLIMITED FREE TIER
-      generationConfig: { 
-        temperature: 1.3,
-        maxOutputTokens: 30
-      }
-    });
+    if (!finalWish) throw new Error('AI_GENERATION_FAILED');
 
-    const historyText = history.length ? `\nAvoid: ${history.slice(-3).join('; ')}` : '';
-    const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{
-          text: `ONE ${wishType} wish (8-15 words):${historyText}
-
-Examples: "Wishing you a productive day!", "May your evening bring peace!"
-
-Wish:`
-        }]
-      }]
-    });
-
-    let wish = result.response.text().trim()
-      .replace(/^["'`•*-]+|["'`•*-]+$/g, '')
-      .replace(/^\d+\.\s*/g, '')
-      .split('\n')[0]
-      .trim();
-
-    res.status(200).json({
+    return res.status(200).json({
       type: 'wish',
-      wish,
+      wish: finalWish,
       wishType,
       source: 'ai',
+      model: usedModel,
       timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     console.error('WISH_ERROR:', error.message);
-    const wishFallbacks = {
-      day: ['Wishing you success today!', 'Have a great day ahead!'],
-      evening: ['Enjoy your evening hours!', 'Peaceful evening wishes!'],
-      night: ['Sweet dreams await you!', 'Rest well tonight!'],
-      afternoon: ['Power through your afternoon!']
-    };
     
-    const fallback = wishFallbacks[wishType]?.[
-      Math.floor(Math.random() * wishFallbacks[wishType].length)
-    ] || 'Have a wonderful day!';
-    
-    res.status(200).json({
+    // Safety Fallback Logic
+    const type = req.body?.wishType || 'day';
+    const pool = wishFallbacks[type] || wishFallbacks['day'];
+    const randomFallback = pool[Math.floor(Math.random() * pool.length)];
+
+    return res.status(200).json({
       type: 'wish',
-      wish: fallback,
-      wishType,
+      wish: randomFallback,
+      wishType: type,
       source: 'fallback',
-      error: error.message.includes('429') ? 'quota_exceeded' : 'ai_error',
+      reason: error.message.includes('429') ? 'quota_limit' : 'error',
       timestamp: new Date().toISOString()
     });
   }
