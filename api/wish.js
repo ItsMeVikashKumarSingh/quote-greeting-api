@@ -11,13 +11,13 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const model = ai.models.getGenerativeModel({
-      model: 'gemma-3-12b-it', // 14.4K RPD limit
-      systemInstruction: `Generate a short ${wishType} wish. Avoid: [${history.join(', ')}]. Return only the wish.`
+      model: 'gemma-3-12b-it', // 14.4K RPD
+      systemInstruction: `Generate a complete ${wishType} wish. Avoid: [${history.join(', ')}]. Return only the wish string.`
     });
 
     const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: "Write wish." }] }],
-      config: { temperature: 1.0, maxOutputTokens: 150 }
+      contents: [{ role: 'user', parts: [{ text: "Write the wish." }] }],
+      config: { temperature: 1.0, maxOutputTokens: 200 }
     });
 
     return res.status(200).json({ 
@@ -26,6 +26,6 @@ export default async function handler(req, res) {
       wishType
     });
   } catch (error) {
-    res.status(200).json({ wish: "Have a wonderful day!", source: 'fallback' });
+    res.status(200).json({ wish: "Have a day!", source: 'fallback' });
   }
 }

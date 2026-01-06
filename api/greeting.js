@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const model = ai.models.getGenerativeModel({
-      model: 'gemma-3-4b-it', // Fastest high-limit model
+      model: 'gemma-3-4b-it', // Fast & 14.4K RPD
       systemInstruction: "You are a Greeting API. Return ONLY the greeting string. No preamble or conversational filler."
     });
 
@@ -25,6 +25,6 @@ export default async function handler(req, res) {
       greeting: result.response.text().trim().split('\n')[0] 
     });
   } catch (error) {
-    res.status(200).json({ greeting: "Good morning!", source: 'fallback' });
+    res.status(200).json({ greeting: "Good ning!", source: 'fallback' });
   }
 }
