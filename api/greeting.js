@@ -10,11 +10,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // MANUAL BODY PARSING
     let bodyString = '';
-    req.on('data', chunk => {
-      bodyString += chunk;
-    });
+    req.on('data', chunk => bodyString += chunk);
     
     const body = await new Promise(resolve => {
       req.on('end', () => {
@@ -28,12 +25,34 @@ export default async function handler(req, res) {
     
     const { greetingType = 'morning', history = [] } = body;
     
+    // SMART FALLBACKS (No AI needed)
+    const greetingFallbacks = {
+      morning: ['Good morning!', 'Rise and shine!', 'Morning sunshine!', 'Hello morning!'],
+      evening: ['Good evening!', 'Evening vibes!', 'Hey evening!', 'Evening greetings!'],
+      night: ['Good night!', 'Sweet dreams!', 'Night night!', 'Sleep well!'],
+      afternoon: ['Good afternoon!', 'Afternoon boost!', 'Hey afternoon!', 'Afternoon vibes!']
+    };
+    
+    const fallback = greetingFallbacks[greetingType]?.[
+      Math.floor(Math.random() * greetingFallbacks[greetingType].length)
+    ] || 'Hello!';
+    
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(200).json({
+        type: 'greeting',
+        greeting: fallback,
+        greetingType,
+        source: 'fallback',
+        timestamp: new Date().toISOString()
+      });
+    }
+
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash-8b',  // HIGHER QUOTA LIMITS
       generationConfig: { 
         temperature: 1.4,
-        maxOutputTokens: 25
+        maxOutputTokens: 20
       }
     });
 
@@ -42,11 +61,11 @@ export default async function handler(req, res) {
       contents: [{
         role: 'user',
         parts: [{
-          text: `Generate ONE SHORT ${greetingType} greeting (3-8 words):${historyText}
+          text: `ONE SHORT ${greetingType} greeting (3-6 words):${historyText}
 
-Examples: "Good morning!", "Rise and shine!", "Evening vibes!"
+Examples: Good morning! Evening vibes!
 
-ONLY greeting text:`
+Greeting:`
         }]
       }]
     });
@@ -61,15 +80,30 @@ ONLY greeting text:`
       type: 'greeting',
       greeting,
       greetingType,
+      source: 'ai',
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
     console.error('GREETING_ERROR:', error.message);
+    // QUOTA-PROOF FALLBACK
+    const greetingFallbacks = {
+      morning: ['Good morning!', 'Rise and shine!', 'Morning sunshine!'],
+      evening: ['Good evening!', 'Evening vibes!', 'Hey evening!'],
+      night: ['Good night!', 'Sweet dreams!', 'Night night!'],
+      afternoon: ['Good afternoon!', 'Afternoon boost!', 'Hey afternoon!']
+    };
+    
+    const fallback = greetingFallbacks[greetingType]?.[
+      Math.floor(Math.random() * greetingFallbacks[greetingType].length)
+    ] || 'Hello!';
+    
     res.status(200).json({
       type: 'greeting',
-      greeting: `Good ${greetingType}!`,
+      greeting: fallback,
       greetingType,
+      source: 'fallback',
+      error: error.message.includes('429') ? 'quota_exceeded' : 'ai_error',
       timestamp: new Date().toISOString()
     });
   }
