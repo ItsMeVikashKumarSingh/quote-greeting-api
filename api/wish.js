@@ -10,10 +10,11 @@ export default async function handler(req, res) {
 
     const response = await ai.models.generateContent({
       model: 'gemma-3-12b-it',
-      systemInstruction: `You are a direct Wish API. Do not ask for context. Simply generate a beautiful ${wishType} wish sentence. Return ONLY the wish text.`,
+      systemInstruction: `You are a Wish API. Return ONLY one beautiful ${wishType} wish sentence. 
+      No quotes. No explanations. Completely avoid history phrases.`,
       contents: [{ 
         role: 'user', 
-        parts: [{ text: `Write a unique ${wishType} wish. Avoid: [${history.join(', ')}].` }] 
+        parts: [{ text: `Unique ${wishType} wish. Avoid these: ${history.join('; ')}.` }] 
       }],
       config: { 
         temperature: 1.4, 
@@ -21,9 +22,25 @@ export default async function handler(req, res) {
       }
     });
 
-    const wish = response.text.trim().replace(/["]+/g, '');
-    return res.status(200).json({ type: 'wish', wish, wishType, model: 'gemma-3-12b-it' });
+    let wish = response.text.trim().replace(/["'\n]+/g, '');
+    
+    // Validation: must be reasonable length and not empty
+    if (wish.length < 10 || wish.length > 150) {
+      throw new Error('Invalid wish length');
+    }
+    
+    return res.status(200).json({ 
+      type: 'wish', 
+      wish, 
+      wishType, 
+      model: 'gemma-3-12b-it' 
+    });
   } catch (error) {
-    res.status(200).json({ wish: "May your day be filled with unexpected joy!", source: 'fallback' });
+    res.status(200).json({ 
+      type: 'wish', 
+      wish: "May your day be filled with unexpected joy!", 
+      wishType: 'day',
+      source: 'fallback' 
+    });
   }
 }
