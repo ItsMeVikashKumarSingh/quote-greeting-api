@@ -1,42 +1,33 @@
 import { GoogleGenAI } from '@google/genai';
 
-const MODELS = ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash-lite'];
+export const maxDuration = 30; // Prevents 504 Gateway errors on Vercel
 
 export default async function handler(req, res) {
-  // ... (headers) ...
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const { history = [] } = req.body || {};
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    
+    // Using Flash-Lite for < 3s latency
+    const model = ai.models.getGenerativeModel({ 
+      model: 'gemini-2.5-flash-lite',
+      systemInstruction: `You are a creative Quote API. You MUST generate a NEW inspirational quote. 
+      CRITICAL: NEVER repeat these previous quotes: [${history.join(', ')}]. 
+      Format strictly as: <quote>"TEXT"\\n<author>NAME. No other text.`
+    });
 
-    const prompt = `Generate ONE UNIQUE inspirational quote.
-<quote>"Quote text here"
-<author>Author Name
-${history.length ? `Avoid: ${history.slice(-5).join('; ')}` : ''}
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: "Generate a fresh quote." }] }],
+      config: { temperature: 1.0, maxOutputTokens: 250 }
+    });
 
-CRITICAL: You MUST finish the response with the </author> tag. Do not truncate.`;
-
-    for (const modelId of MODELS) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelId,
-          systemInstruction: "Format: <quote>\"TEXT\"\\n<author>NAME. No extra text.",
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: { 
-            temperature: 0.8, 
-            maxOutputTokens: 500 // Increased to prevent the author tag from being cut off
-          }
-        });
-
-        const text = response.text.trim();
-        if (text.includes('<quote>') && text.includes('<author>')) {
-          return res.status(200).send(text);
-        }
-      } catch (err) {
-        if (err.message.includes('429')) continue;
-        throw err;
-      }
+    const text = result.response.text().trim();
+    if (text.includes('<quote>') && text.includes('<author>')) {
+      return res.status(200).send(text);
     }
-    throw new Error("Validation failed");
+    throw new Error("Invalid Format");
   } catch (error) {
     res.status(200).send('<quote>"Success is not final, failure is not fatal."\n<author>Winston Churchill');
   }
