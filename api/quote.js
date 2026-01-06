@@ -1,11 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 
-// Priority List: Smartest -> Fastest -> Highest Free Quota
-const MODEL_FALLBACKS = [
-  'gemini-3-pro-preview',   // Tier 1: PhD reasoning, lowest free limit
-  'gemini-3-flash-preview', // Tier 2: Great variety, medium free limit
-  'gemini-2.5-flash-lite'   // Tier 3: Workhorse, 1,000 req/day free limit
-];
+const MODELS = ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash-lite'];
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -17,69 +12,44 @@ export default async function handler(req, res) {
 
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('API_KEY_MISSING');
-
-    // Parse history from POST or GET
-    let history = [];
-    if (req.method === 'POST') {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-      history = body.history || [];
-    } else {
-      history = req.query.history ? JSON.parse(req.query.history) : [];
-    }
-
     const ai = new GoogleGenAI({ apiKey });
+
+    // Use Vercel's built-in body helper for simpler history extraction
+    const body = req.body || {};
+    const history = body.history || (req.query.history ? JSON.parse(req.query.history) : []);
+
     const historyText = history.length > 0 
-      ? `\n\nPREVIOUSLY GENERATED (DO NOT REPEAT):\n${history.slice(0, 10).join('\n')}\n` 
+      ? `\n\nPREVIOUSLY GENERATED QUOTES (DO NOT REPEAT):\n${history.slice(0, 10).map((q, i) => `${i+1}. ${q}`).join('\n')}\n` 
       : '';
 
-    const prompt = `Generate ONE UNIQUE inspirational quote.
+    const prompt = `Generate ONE UNIQUE inspirational quote in this format:
 <quote>"Quote text here"
 <author>Author Name
 ${historyText}
 REQUIREMENTS:
-- Diverse topics: courage, wisdom, perseverance.
-- Real or inspirational authors.
+- Completely different from above quotes.
+- Use diverse topics: success, courage, wisdom, etc.
 Return ONLY the quote in exact format.`;
 
-    // FALLBACK LOOP
-    let lastError = null;
-    for (const modelId of MODEL_FALLBACKS) {
+    for (const modelId of MODELS) {
       try {
         const response = await ai.models.generateContent({
           model: modelId,
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: { 
-            temperature: 1.2,
-            maxOutputTokens: 100 
-          }
+          config: { temperature: 1.2, maxOutputTokens: 250 }
         });
 
-        // SUCCESS: Return the generated text
-        return res.status(200).send(response.text.trim());
-        
-      } catch (err) {
-        lastError = err;
-        // If it's a Quota (429) or Overloaded (503) error, try the next model
-        if (err.message.includes('429') || err.message.includes('503')) {
-          console.warn(`Fallback: ${modelId} failed, trying next...`);
-          continue;
+        const text = response.text.trim();
+        if (text.includes('<quote>') && text.includes('<author>')) {
+          return res.status(200).send(text);
         }
-        break; // If it's a structural error (like 400), don't bother retrying
+      } catch (err) {
+        if (err.message.includes('429')) continue; // Try next model on quota limit
+        throw err;
       }
     }
-
-    throw lastError || new Error("All models failed");
-
+    throw new Error("Quota Full");
   } catch (error) {
-    console.error('FINAL_ERROR:', error.message);
-    const fallbacks = [
-      '<quote>"The only way to do great work is to love what you do."\n<author>Steve Jobs',
-      '<quote>"Success is not final, failure is not fatal."\n<author>Winston Churchill',
-      '<quote>"Make each day your masterpiece."\n<author>John Wooden'
-    ];
-    res.status(200).send(fallbacks[Math.floor(Math.random() * fallbacks.length)]);
+    res.status(200).send('<quote>"Success is not final, failure is not fatal."\n<author>Winston Churchill');
   }
 }
