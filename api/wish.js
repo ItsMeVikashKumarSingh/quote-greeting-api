@@ -4,14 +4,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  const MODEL_PRIORITY = [
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-    'gemma-3-27b-it',
-    'gemma-3-12b-it'
-  ];
-
-  const BAD_PATTERNS = ['here are', 'let', 'okay', 'craft', 'options', 'ranging'];
+  const MODEL_PRIORITY = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemma-3-27b-it', 'gemma-3-12b-it'];
+  const BAD_WORDS = ['okay', 'here', 'few', 'tone', 'option'];
 
   try {
     const { wishType = 'day', history = [] } = req.body || {};
@@ -23,23 +17,31 @@ export default async function handler(req, res) {
       try {
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `WISH API. ONE ${wishType.toUpperCase()} wish sentence. 10-25 words. 
-          End with period. NO lists. NO "here". NO explain. NO categories.`,
-          contents: [{ role: 'user', parts: [{ text: `${wishType} wish. Avoid: ${history.slice(0,3).join(';')}` }] }],
-          config: { temperature: 0.9, maxOutputTokens: 60 }
+          systemInstruction: `You are not conversational. Generate one ${wishType} wish sentence. No lists.`,
+          contents: [{ role: 'user', parts: [{ text: `${wishType} wish${history.length ? `. Avoid: ${history.slice(0,2).join(', ')}` : ''}` }] }],
+          config: { 
+            temperature: 0.9,
+            maxOutputTokens: 50,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'object',
+              properties: { text: { type: 'string' } },
+              required: ['text']
+            }
+          }
         });
 
-        wish = response.text.trim()
-          .replace(/["'\n]+/g, '')
-          .split('.')[0] + '.';
+        const parsed = JSON.parse(response.text);
+        wish = parsed.text.trim();
+        if (!wish.endsWith('.') && !wish.endsWith('!')) wish += '.';
 
-        if (wish.length >= 15 && wish.length <= 120 && 
-            wish.split('.').length === 1 &&
-            !BAD_PATTERNS.some(p => wish.toLowerCase().includes(p))) {
+        const lowerWish = wish.toLowerCase();
+        if (wish.length >= 15 && wish.length <= 100 && 
+            !BAD_WORDS.some(w => lowerWish.includes(w))) {
           usedModel = model;
           break;
         }
-        throw new Error(`Wish failed: "${wish}"`);
+        throw new Error('Invalid format');
       } catch (error) {
         console.error(`Wish ${model}:`, error.message);
         continue;
@@ -48,18 +50,13 @@ export default async function handler(req, res) {
 
     if (!wish) throw new Error('No valid wish');
 
-    return res.status(200).json({ 
-      type: 'wish', 
-      wish, 
-      wishType, 
-      model: usedModel 
-    });
+    return res.status(200).json({ type: 'wish', wish, wishType, model: usedModel });
 
   } catch (error) {
     console.error('Wish fallback:', error);
     res.status(200).json({ 
       type: 'wish', 
-      wish: "Wishing you a day filled with unexpected joy and peace.",
+      wish: "Wishing you a peaceful evening filled with warmth.",
       wishType,
       source: 'fallback' 
     });

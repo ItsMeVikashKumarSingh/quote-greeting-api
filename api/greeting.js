@@ -4,14 +4,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  const MODEL_PRIORITY = [
-    'gemini-2.5-flash',
-    'gemini-2.5-pro', 
-    'gemma-3-27b-it',
-    'gemma-3-12b-it'
-  ];
-
-  const BAD_PATTERNS = ['here are', 'let', 'okay', 'craft', 'bunch', 'options', 'ranging', 'tone'];
+  const MODEL_PRIORITY = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemma-3-27b-it', 'gemma-3-12b-it'];
+  const BAD_WORDS = ['okay', 'here', 'let', 'craft', 'bunch', 'few'];
 
   try {
     const { greetingType = 'morning', history = [] } = req.body || {};
@@ -23,49 +17,44 @@ export default async function handler(req, res) {
       try {
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `GREETING API. 5 WORDS MAX. ONLY: [${greetingType} greeting]. 
-          NO intro. NO lists. NO "here". NO "let". NO explain. NO punctuation after greeting.`,
-          contents: [{ role: 'user', parts: [{ text: `${greetingType} greeting. ${history.length ? `Avoid: ${history.slice(0,3).join(';')}` : ''}` }] }],
-          config: { temperature: 0.7, topP: 0.9, maxOutputTokens: 20 }
+          systemInstruction: `You are not conversational. Data API only. Generate one ${greetingType} greeting sentence. No explanations.`,
+          contents: [{ role: 'user', parts: [{ text: `Single ${greetingType} greeting${history.length ? `. Avoid: ${history.slice(0,2).join(', ')}` : ''}` }] }],
+          config: { 
+            temperature: 0.6,
+            maxOutputTokens: 30,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'object',
+              properties: { text: { type: 'string' } },
+              required: ['text']
+            }
+          }
         });
 
-        // Bulletproof parsing
-        greeting = response.text.trim()
-          .replace(/[.!?;,:\[\]"']/g, '')  // Strip all
-          .split('\n')[0]
-          .split(' ')
-          .slice(0, 8)
-          .join(' ');
+        const parsed = JSON.parse(response.text);
+        greeting = parsed.text.trim().replace(/[.!?]+$/, '');
 
-        // Strict validation
-        if (greeting.length >= 8 && greeting.length <= 50 && 
-            !BAD_PATTERNS.some(p => greeting.toLowerCase().includes(p))) {
+        // Validate
+        const lowerGreeting = greeting.toLowerCase();
+        if (greeting.length >= 8 && greeting.length <= 60 && 
+            !BAD_WORDS.some(w => lowerGreeting.includes(w)) &&
+            greeting.split(' ').length <= 10) {
           usedModel = model;
           break;
         }
-        throw new Error(`Format failed: "${greeting}"`);
+        throw new Error('Invalid format');
       } catch (error) {
         console.error(`Greeting ${model}:`, error.message);
         continue;
       }
     }
 
-    if (!greeting) throw new Error('All models failed validation');
+    if (!greeting) throw new Error('All models failed');
 
-    return res.status(200).json({ 
-      type: 'greeting', 
-      greeting, 
-      greetingType, 
-      model: usedModel 
-    });
+    return res.status(200).json({ type: 'greeting', greeting, greetingType, model: usedModel });
 
   } catch (error) {
-    console.error('Greeting final fallback:', error);
-    res.status(200).json({ 
-      type: 'greeting', 
-      greeting: "Good morning sunshine!", 
-      greetingType, 
-      source: 'fallback' 
-    });
+    console.error('Greeting fallback:', error);
+    res.status(200).json({ type: 'greeting', greeting: "Good morning sunshine", greetingType: 'morning', source: 'fallback' });
   }
 }

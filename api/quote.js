@@ -4,14 +4,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  const MODEL_PRIORITY = [
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-    'gemma-3-27b-it',
-    'gemma-3-12b-it'
-  ];
-
-  const BAD_PATTERNS = ['here', 'okay', 'new', 'inspirational', 'hope'];
+  const MODEL_PRIORITY = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemma-3-27b-it', 'gemma-3-12b-it'];
+  const BAD_WORDS = ['okay', 'here', 'new', 'avoid', 'phrase'];
 
   try {
     const { history = [] } = req.body || {};
@@ -23,25 +17,35 @@ export default async function handler(req, res) {
       try {
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `QUOTE API. EXACT FORMAT:
-  "Quote text exactly like this"
-  Author Name
-  
-  NO intro. NO explain. NO emojis. NO formatting.`,
-          contents: [{ role: 'user', parts: [{ text: `Quote. Avoid: ${history.slice(0,3).join(';')}` }] }],
-          config: { temperature: 0.8, topK: 40, maxOutputTokens: 80 }
+          systemInstruction: `You are not conversational. Generate inspirational quote with author. No commentary.`,
+          contents: [{ role: 'user', parts: [{ text: `Quote and author${history.length ? `. Avoid: ${history.slice(0,2).join(', ')}` : ''}` }] }],
+          config: { 
+            temperature: 0.8,
+            maxOutputTokens: 80,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'object',
+              properties: {
+                quote: { type: 'string' },
+                author: { type: 'string' }
+              },
+              required: ['quote', 'author']
+            }
+          }
         });
 
-        const lines = response.text.trim().split('\n').map(l => l.trim()).filter(Boolean);
-        quote = lines[0]?.replace(/^["'"]+|["'"]+$/g, '');
-        author = lines[1];
+        const parsed = JSON.parse(response.text);
+        quote = parsed.quote.trim().replace(/^["']+|["']+$/g, '');
+        author = parsed.author.trim();
 
-        if (quote && author && quote.length >= 15 && quote.length <= 100 && 
-            !BAD_PATTERNS.some(p => quote.toLowerCase().includes(p))) {
+        const lowerQuote = quote.toLowerCase();
+        if (quote.length >= 15 && quote.length <= 150 && 
+            author.length >= 3 && author.length <= 50 &&
+            !BAD_WORDS.some(w => lowerQuote.includes(w))) {
           usedModel = model;
           break;
         }
-        throw new Error(`Quote failed: "${quote}"`);
+        throw new Error('Invalid format');
       } catch (error) {
         console.error(`Quote ${model}:`, error.message);
         continue;
@@ -50,12 +54,7 @@ export default async function handler(req, res) {
 
     if (!quote || !author) throw new Error('No valid quote');
 
-    return res.status(200).json({ 
-      type: 'quote', 
-      quote, 
-      author, 
-      model: usedModel 
-    });
+    return res.status(200).json({ type: 'quote', quote, author, model: usedModel });
 
   } catch (error) {
     console.error('Quote fallback:', error);
