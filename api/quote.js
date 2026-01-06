@@ -7,32 +7,36 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
   try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const body = req.body || {};
     const history = body.history || (req.query.history ? JSON.parse(req.query.history) : []);
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const historyText = history.length > 0 
-      ? `\n\nDO NOT REPEAT THESE QUOTES:\n${history.slice(0, 10).map((q, i) => `${i+1}. ${q}`).join('\n')}\n` 
+      ? `\n\nPREVIOUSLY GENERATED (DO NOT REPEAT):\n${history.slice(0, 10).map((q, i) => `${i+1}. ${q}`).join('\n')}\n` 
       : '';
 
-    const prompt = `Generate ONE UNIQUE inspirational quote.
+    const prompt = `Generate ONE COMPLETE inspirational quote.
 <quote>"Quote text here"
 <author>Author Name
 ${historyText}
 REQUIREMENTS:
-- Use exact format above.
-- Must be a full quote and a real author name.`;
+- You MUST provide both the quote and the author.
+- Do not stop until the author's name is fully written.`;
 
     for (const modelId of MODELS) {
       try {
         const response = await ai.models.generateContent({
           model: modelId,
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: { temperature: 0.8, maxOutputTokens: 250 } // Plenty of room for full text
+          config: { 
+            temperature: 0.8, // Lowered for better consistency
+            maxOutputTokens: 300 // Massive headroom to prevent "<quote" truncation
+          }
         });
 
         const text = response.text.trim();
-        if (text.includes('<quote>') && text.includes('<author>')) {
+        // Structural Validation: Only return if the AI actually finished the format
+        if (text.includes('<quote>') && text.includes('<author>') && text.length > 20) {
           return res.status(200).send(text);
         }
       } catch (err) {
@@ -40,7 +44,7 @@ REQUIREMENTS:
         throw err;
       }
     }
-    throw new Error("Failed");
+    throw new Error("Validation Failed");
   } catch (error) {
     res.status(200).send('<quote>"The only way to do great work is to love what you do."\n<author>Steve Jobs');
   }
