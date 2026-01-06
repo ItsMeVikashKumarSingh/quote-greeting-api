@@ -2,23 +2,14 @@
   "version": 2,
   "functions": {
     "api/**/*.js": {
-      "memory": 2048,
-      "maxDuration": 15
+      "memory": 1024,
+      "maxDuration": 8
     }
   },
   "rewrites": [
-    { "source": "/api/health", "destination": "/api/index.js" },
+    { "source": "/api/greeting", "destination": "/api/greeting.js" },
+    { "source": "/api/wish", "destination": "/api/wish.js" },
     { "source": "/api/quote", "destination": "/api/quote.js" },
-    { "source": "/api/greeting", "destination": "/api/greeting.js" }
-  ],
-  "headers": [
-    {
-      "source": "/api/(quote|greeting)",
-      "headers": [
-        { "key": "Cache-Control", "value": "s-maxage=300, stale-while-revalidate" },
-        { "key": "X-API-Version", "value": "1.0.0" },
-        { "key": "X-Powered-By", "value": "Vercel + Gemini AI" }
-      ]
-    }
+    { "source": "/api/health", "destination": "/api/health.js" }
   ]
 }

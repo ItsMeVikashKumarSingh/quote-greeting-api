@@ -11,14 +11,14 @@ export default async function handler(req, res) {
       req.on('end', () => resolve(data));
     });
     
-    const { greetingType = 'morning', history = [] } = JSON.parse(bodyString || '{}');
+    const { wishType = 'day', history = [] } = JSON.parse(bodyString || '{}');
     
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-2.5-flash',
       generationConfig: { 
-        temperature: 1.4,
-        maxOutputTokens: 25  // Very short
+        temperature: 1.3,
+        maxOutputTokens: 35  // Wish length
       }
     });
 
@@ -27,33 +27,36 @@ export default async function handler(req, res) {
       contents: [{
         role: 'user',
         parts: [{
-          text: `Generate ONE SHORT ${greetingType} greeting (3-8 words only):${historyText}
+          text: `Generate ONE ${wishType} wish (10-20 words):${historyText}
 
-Examples: "Good morning!", "Rise and shine!", "Evening vibes!", "Sweet dreams!"
+Examples: 
+"I wish you a productive and joyful day!", 
+"May your evening bring peace and relaxation!",
+"Hope your night fills with sweet dreams!"
 
-ONLY greeting text:`
+ONLY wish text:`
         }]
       }]
     });
 
-    let greeting = result.response.text().trim()
+    let wish = result.response.text().trim()
       .replace(/^["'`•*-]+|["'`•*-]+$/g, '')
       .replace(/^\d+\.\s*/g, '')
       .split('\n')[0]
       .trim();
 
     res.status(200).json({
-      type: 'greeting',
-      greeting,
-      greetingType,
+      type: 'wish',
+      wish,
+      wishType,
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
     res.status(200).json({
-      type: 'greeting',
-      greeting: `Good ${greetingType}!`,
-      greetingType,
+      type: 'wish',
+      wish: `I wish you a wonderful ${wishType}!`,
+      wishType,
       timestamp: new Date().toISOString()
     });
   }
