@@ -4,15 +4,14 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  // GEMMA FIRST - your available quota
   const MODEL_PRIORITY = [
-    'gemma-3-27b-it',      // 131K TPM ✅
-    'gemma-3-12b-it',      // 32K TPM ✅
-    'gemini-2.0-flash',    // Lower usage
-    'gemini-2.5-flash-lite' // Separate quota
+    'gemma-3-27b-it',      // Text mode only
+    'gemma-3-12b-it',      // Text mode only  
+    'gemini-2.0-flash',    // JSON mode ✅
+    'gemini-2.5-flash-lite'// JSON mode ✅
   ];
 
-  const BAD_WORDS = ['okay', 'here', 'few', 'tone', 'option', 'craft'];
+  const BAD_WORDS = ['okay', 'here', 'few', 'tone'];
 
   try {
     const { wishType = 'day', history = [] } = req.body || {};
@@ -23,57 +22,73 @@ export default async function handler(req, res) {
     for (const model of MODEL_PRIORITY) {
       try {
         console.log(`Trying wish model: ${model}`);
+        
+        // DYNAMIC CONFIG - JSON only for Gemini
+        const isGeminiModel = model.startsWith('gemini');
+        const config = {
+          temperature: 0.8,
+          maxOutputTokens: 45
+        };
+        
+        if (isGeminiModel) {
+          config.responseMimeType = 'application/json';
+          config.responseSchema = { 
+            type: 'object', 
+            properties: { text: { type: 'string' } }, 
+            required: ['text'] 
+          };
+        }
+
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `Data API. No conversation. Single ${wishType} wish sentence only.`,
+          systemInstruction: `Data API. Single ${wishType} wish sentence. No lists. No explanation.`,
           contents: [{ role: 'user', parts: [{ text: `${wishType.charAt(0).toUpperCase() + wishType.slice(1)} wish` }] }],
-          config: { 
-            temperature: 0.8,
-            maxOutputTokens: 40,
-            responseMimeType: 'application/json',
-            responseSchema: { 
-              type: 'object', 
-              properties: { text: { type: 'string' } }, 
-              required: ['text'] 
-            }
-          }
+          config
         });
 
-        const parsed = JSON.parse(response.text);
-        wish = parsed.text.trim();
-        if (!wish.match(/[.!?]$/)) wish += '.';
+        let rawText;
+        if (isGeminiModel) {
+          const parsed = JSON.parse(response.text);
+          rawText = parsed.text.trim();
+        } else {
+          // Gemma: Aggressive text parsing
+          rawText = response.text.trim()
+            .replace(/[.!?;,:\[\]"']/g, '')
+            .split('\n')[0]
+            .split(' ')
+            .slice(0, 12)
+            .join(' ') + '.';
+        }
 
-        const lowerWish = wish.toLowerCase();
-        if (wish.length >= 12 && wish.length <= 80 && 
-            !BAD_WORDS.some(w => lowerWish.includes(w)) &&
-            wish.split(' ').length <= 15) {
+        const lowerText = rawText.toLowerCase();
+        if (rawText.length >= 12 && rawText.length <= 80 && 
+            !BAD_WORDS.some(w => lowerText.includes(w))) {
+          wish = rawText;
           usedModel = model;
           console.log(`✅ Wish success: ${model} -> "${wish}"`);
           break;
         }
-        throw new Error('Format validation failed');
+        throw new Error('Validation failed');
       } catch (error) {
         const isQuotaError = error.message.includes('429') || error.message.includes('quota');
-        console.error(`❌ Wish ${model}:`, isQuotaError ? 'QUOTA EXCEEDED - skipping' : error.message);
-        if (!isQuotaError) throw error;
-        continue;  // Skip quota errors only
+        const isJsonError = error.message.includes('JSON mode');
+        console.error(`❌ Wish ${model}:`, 
+          isQuotaError ? 'QUOTA - skip' : 
+          isJsonError ? 'JSON UNSUPPORTED - skip' : 
+          error.message);
+        continue;  // Skip quota/JSON errors
       }
     }
 
-    if (!wish) throw new Error('All models quota exceeded');
+    if (!wish) throw new Error('All models failed');
 
-    return res.status(200).json({ 
-      type: 'wish', 
-      wish, 
-      wishType, 
-      model: usedModel 
-    });
+    return res.status(200).json({ type: 'wish', wish, wishType, model: usedModel });
 
   } catch (error) {
-    console.error('Wish final fallback:', error);
+    console.error('Wish fallback:', error);
     res.status(200).json({ 
       type: 'wish', 
-      wish: `Wishing you a beautiful ${wishType}.`, 
+      wish: `Wishing you a wonderful ${wishType}.`, 
       wishType, 
       source: 'fallback' 
     });
