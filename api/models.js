@@ -2,6 +2,7 @@
 import { GoogleGenAI } from '@google/genai';
 
 export default async function handler(req, res) {
+  // ESM doesn't need 'use strict' or specific wrapper logic for Vercel headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
@@ -11,35 +12,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    // New 2026 SDK Client initialization
     const ai = new GoogleGenAI({ apiKey });
 
-    // In @google/genai, we use ai.models.list()
+    // The new SDK method to list models
     const response = await ai.models.list();
     
-    // Formatting the output for your test dashboard
     const formattedModels = response.models.map(m => ({
       id: m.name.replace('models/', ''),
       name: m.displayName,
       inputLimit: m.inputTokenLimit,
-      // Check for Gemini 3 specific 'Thinking' capability
-      thinking: m.supportedGenerationMethods.includes('generateContent') && 
-                (m.name.includes('gemini-3') || m.name.includes('2.5')),
+      // Flash 3 and Pro 3 logic
+      isLatest: m.name.includes('gemini-3') || m.name.includes('2.5'),
       capabilities: m.supportedGenerationMethods
     }));
 
     return res.status(200).json({
       status: 'success',
-      sdk: "@google/genai (v1.34.0)",
-      total: formattedModels.length,
+      sdk: "Unified @google/genai",
       models: formattedModels
     });
 
   } catch (error) {
     return res.status(500).json({ 
       status: 'error', 
-      message: error.message,
-      stack: "Check if GEMINI_API_KEY is restricted to specific models in AI Studio."
+      message: error.message 
     });
   }
 }
