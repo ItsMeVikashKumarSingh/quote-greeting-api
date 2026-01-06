@@ -11,15 +11,12 @@ export default async function handler(req, res) {
     'gemini-2.5-flash-lite'
   ];
 
-  // We will completely ignore any text that is not in this pattern:
-  // <quote>Some quote text
-  // <author>Author Name
-  const QUOTE_BLOCK_REGEX = /<quote>(.+?)\n<author>(.+?)(?:\n|$)/gis;
+  // Pattern: <quote>...newline<author>...
+  const QUOTE_BLOCK_REGEX = /<quote>(.+?)\n<author>(.+?)(?:\n|$)/is;
 
-  // Last-resort fallback
   const FALLBACK = {
-    quote: "The future belongs to those who believe in the beauty of their dreams.",
-    author: "Eleanor Roosevelt"
+    quote: 'The future belongs to those who believe in the beauty of their dreams.',
+    author: 'Eleanor Roosevelt'
   };
 
   try {
@@ -33,24 +30,18 @@ export default async function handler(req, res) {
       try {
         console.log(`Trying quote model: ${model}`);
 
-        // Single, extremely strict instruction for ALL models
         const systemInstruction = [
           'You are a quote data API.',
-          'You MUST respond ONLY in this exact format, with no extra text before, between, or after blocks:',
+          'Respond ONLY in this exact pattern, no other text:',
           '',
-          '<quote>Quote sentence 1',
-          '<author>Author Name 1',
-          '',
-          '<quote>Quote sentence 2',
-          '<author>Author Name 2',
+          '<quote>Quote sentence',
+          '<author>Author Name',
           '',
           'Rules:',
-          '- Do NOT write any introductions like "Here is a quote" or "Okay, here\'s..."',
-          '- Do NOT add markdown, **, ``` or any other formatting.',
-          '- Do NOT wrap the quote in additional quotation marks unless they are part of the quote itself.',
-          '- Do NOT add bullets, numbering, or explanations.',
-          '- Each quote block MUST be exactly two lines: one <quote> line and one <author> line.',
-          '- You may return one or more such blocks, but nothing else.',
+          '- No introduction such as "Here is a quote" or "Okay, here\'s...".',
+          '- No markdown (** or ```).',
+          '- Exactly two lines per quote: one <quote>, one <author>.',
+          '- Return exactly ONE quote block.',
         ].join('\n');
 
         const response = await ai.models.generateContent({
@@ -61,42 +52,56 @@ export default async function handler(req, res) {
               role: 'user',
               parts: [
                 {
-                  text: 'Return exactly ONE inspirational quote and its author using the <quote> and <author> format described.'
+                  text:
+                    'Return exactly ONE inspirational quote in the <quote>/<author> format.'
                 }
               ]
             }
           ],
           config: {
-            temperature: 0.4,
-            maxOutputTokens: 120
+            temperature: 0.3,
+            maxOutputTokens: 60
           }
         });
 
-        const raw = (response.text || '').trim();
+  // SAFETY: handle different shapes of response
+let raw;
+
+if (typeof response?.text === 'string') {
+  // Case 1: SDK exposes .text directly
+  raw = response.text;
+} else if (
+  Array.isArray(response?.candidates) &&
+  response.candidates[0]?.content?.parts?.[0]?.text
+) {
+  // Case 2: candidates[0].content.parts[0].text
+  raw = response.candidates[0].content.parts[0].text;
+} else {
+  throw new Error('No text in response');
+}
+
+raw = String(raw).trim();
+
         console.log(`Raw response from ${model}:\n${raw}`);
 
-        // Extract the first valid <quote>… <author>… block
-        const match = QUOTE_BLOCK_REGEX.exec(raw);
-
+        const match = raw.match(QUOTE_BLOCK_REGEX);
         if (!match) {
           throw new Error('No <quote>/<author> block found');
         }
 
-        let rawQuote = match.trim();[1]
-        let rawAuthor = match.trim();[2]
+        let rawQuote = match;[1]
+        let rawAuthor = match;[2]
 
-        // Clean possible outer quotes and markdown
         const clean = (s) =>
-          s
-            .replace(/^\s*["']+|\s*["']+$/g, '') // leading/trailing quotes
-            .replace(/\*\*/g, '')               // remove bold markers
+          String(s || '')
+            .replace(/^\s*["']+|\s*["']+$/g, '') // trim outer quotes
+            .replace(/\*\*/g, '')               // remove **
             .replace(/`/g, '')                  // remove backticks
             .trim();
 
         rawQuote = clean(rawQuote);
         rawAuthor = clean(rawAuthor);
 
-        // Basic sanity checks
         if (rawQuote.length < 10) {
           throw new Error(`Quote too short: "${rawQuote}"`);
         }
@@ -112,17 +117,14 @@ export default async function handler(req, res) {
         break;
       } catch (error) {
         const msg = String(error.message || error);
-        const isQuotaError = msg.includes('429') || msg.toLowerCase().includes('quota');
+        const isQuotaError =
+          msg.includes('429') || msg.toLowerCase().includes('quota');
 
         console.error(
           `❌ Quote ${model}:`,
           isQuotaError ? 'QUOTA - skip' : msg
         );
-        if (isQuotaError) {
-          // Move on to the next model
-          continue;
-        }
-        // For non-quota errors, also continue to next model
+
         continue;
       }
     }
