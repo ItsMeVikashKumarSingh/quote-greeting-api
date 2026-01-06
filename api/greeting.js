@@ -5,100 +5,106 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
 
   const MODEL_PRIORITY = [
-    'gemma-3-27b-it',      // 131K TPM ✅
-    'gemma-3-12b-it',      // 32K TPM ✅
-    'gemini-2.0-flash',    // Available
-    'gemini-2.5-flash-lite'// Separate quota
+    'gemma-3-27b-it',       // Text mode only
+    'gemma-3-12b-it',       // Text mode only
+    'gemini-2.0-flash',     // JSON mode ✅
+    'gemini-2.5-flash-lite' // JSON mode ✅
   ];
 
-  const BAD_WORDS = ['okay', 'here', 'let', 'craft', 'bunch', 'few', 'tone'];
+  const BAD_WORDS = ['okay', 'here', 'let', 'craft'];
 
   try {
-    const { greetingType = 'morning', history = [] } = req.body || {};
+    const { greetingType = 'morning' } = req.body || {};
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    let greeting, usedModel;
+    let greeting = null;
+    let usedModel = null;
 
     for (const model of MODEL_PRIORITY) {
       try {
         console.log(`Trying greeting model: ${model}`);
-        
         const isGeminiModel = model.startsWith('gemini');
+
         const config = {
           temperature: 0.6,
-          maxOutputTokens: 30
+          maxOutputTokens: 25
         };
-        
+
         if (isGeminiModel) {
           config.responseMimeType = 'application/json';
-          config.responseSchema = { 
-            type: 'object', 
-            properties: { text: { type: 'string' } }, 
-            required: ['text'] 
+          config.responseSchema = {
+            type: 'object',
+            properties: { text: { type: 'string' } },
+            required: ['text']
           };
         }
 
         const response = await ai.models.generateContent({
           model,
-          systemInstruction: `Data API. No conversation. Single ${greetingType} greeting only.`,
-          contents: [{ role: 'user', parts: [{ text: `${greetingType.charAt(0).toUpperCase() + greetingType.slice(1)} greeting` }] }],
+          systemInstruction: `Data API only. Single ${greetingType} greeting sentence. No intro. No lists.`,
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `${greetingType.charAt(0).toUpperCase() + greetingType.slice(1)} greeting` }]
+            }
+          ],
           config
         });
 
         let rawText;
+
         if (isGeminiModel) {
           const parsed = JSON.parse(response.text);
-          rawText = parsed.text.trim();
+          rawText = (parsed.text || '').trim();
         } else {
-          // Gemma: Nuclear text parsing
-          rawText = response.text.trim()
-            .replace(/[.!?;,:\[\]"']/g, '')  // Strip everything
+          rawText = response.text
+            .trim()
+            .replace(/^[^\w]*|["'.,;:!?]+$/g, '')
             .split('\n')[0]
-            .split(' ')
-            .slice(0, 10)  // Max 10 words
-            .join(' ');
-          
-          // Capitalize first letter
-          rawText = rawText.charAt(0).toUpperCase() + rawText.slice(1);
+            .split(/\s+/)
+            .slice(0, 8)
+            .join(' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
         }
 
         const lowerText = rawText.toLowerCase();
-        if (rawText.length >= 8 && rawText.length <= 50 && 
-            !BAD_WORDS.some(w => lowerText.includes(w)) &&
-            rawText.split(' ').length <= 10) {
+        if (
+          rawText.length >= 8 &&
+          rawText.length <= 45 &&
+          !BAD_WORDS.some(w => lowerText.includes(w))
+        ) {
           greeting = rawText;
           usedModel = model;
-          console.log(`✅ Greeting success: ${model} -> "${greeting}"`);
+          console.log(`✅ Greeting success: ${model}`);
           break;
+        } else {
+          throw new Error(`Validation failed: "${rawText}"`);
         }
-        throw new Error(`Validation failed: "${rawText}"`);
       } catch (error) {
-        const isQuotaError = error.message.includes('429') || error.message.includes('quota');
-        const isJsonError = error.message.includes('JSON mode');
-        console.error(`❌ Greeting ${model}:`, 
-          isQuotaError ? 'QUOTA EXCEEDED - skipping' : 
-          isJsonError ? 'JSON UNSUPPORTED - skipping' : 
-          error.message);
-        continue;  // Skip quota/JSON errors
+        const msg = String(error.message || error);
+        const isJsonError = msg.includes('JSON mode');
+        console.error(
+          `❌ Greeting ${model}:`,
+          isJsonError ? 'JSON UNSUPPORTED - skip' : msg
+        );
+        continue;
       }
     }
 
-    if (!greeting) throw new Error('All models exhausted');
-
-    return res.status(200).json({ 
-      type: 'greeting', 
-      greeting, 
-      greetingType, 
-      model: usedModel 
+    return res.status(200).json({
+      type: 'greeting',
+      greeting: greeting || 'Good morning beautiful day',
+      greetingType,
+      model: usedModel || 'none'
     });
-
   } catch (error) {
-    console.error('Greeting final fallback:', error);
-    res.status(200).json({ 
-      type: 'greeting', 
-      greeting: `${greetingType.charAt(0).toUpperCase() + greetingType.slice(1)} beautiful day ahead`, 
-      greetingType, 
-      source: 'fallback' 
+    console.error('Greeting fallback:', error);
+    const greetingType = (req.body && req.body.greetingType) || 'morning';
+    return res.status(200).json({
+      type: 'greeting',
+      greeting: 'Rise and shine today',
+      greetingType,
+      source: 'fallback'
     });
   }
 }
