@@ -1,32 +1,29 @@
 import { GoogleGenAI } from '@google/genai';
 
-export const maxDuration = 30;
+export const maxDuration = 30; // Prevents Vercel 10s timeout
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
   try {
-    const { history = [] } = req.body || {};
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    
+    const apiKey = process.env.GEMINI_API_KEY;
+    const ai = new GoogleGenAI({ apiKey });
+    const { history = [] } = req.body || (req.query.history ? { history: JSON.parse(req.query.history) } : {});
+
     const model = ai.models.getGenerativeModel({ 
-      model: 'gemini-2.5-flash-lite',
-      systemInstruction: `You are a creative Quote API. You MUST generate a NEW inspirational quote. 
-      CRITICAL: NEVER repeat these previous quotes: [${history.join(', ')}]. 
-      Format: <quote>"TEXT"\\n<author>NAME. Return ONLY this format.`
+      model: 'gemma-3-27b-it', // High limit: 14.4K RPD
+      systemInstruction: `You are a Quote API. Generate ONE UNIQUE inspirational quote. 
+      CRITICAL: Never repeat these: [${history.join(', ')}]. 
+      Format: <quote>"TEXT"\\n<author>NAME. No filler.`
     });
 
     const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: "Generate a fresh quote." }] }],
-      config: { temperature: 1.2, maxOutputTokens: 300 } // Prevents cutting off mid-quote
+      contents: [{ role: 'user', parts: [{ text: "Generate a new quote." }] }],
+      config: { temperature: 1.0, maxOutputTokens: 300 }
     });
 
-    const text = result.response.text().trim();
-    if (text.includes('<quote>') && text.includes('<author>')) {
-      return res.status(200).send(text);
-    }
-    throw new Error("Bad Format");
+    return res.status(200).send(result.response.text().trim());
   } catch (error) {
     res.status(200).send('<quote>"Success is not final, failure is not fatal."\n<author>Winston Churchill');
   }

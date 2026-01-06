@@ -11,13 +11,13 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const model = ai.models.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
-      systemInstruction: `Generate a beautiful ${wishType} wish. Avoid these: [${history.join(', ')}]. Return only the wish string.`
+      model: 'gemma-3-12b-it', // 14.4K RPD limit
+      systemInstruction: `Generate a short ${wishType} wish. Avoid: [${history.join(', ')}]. Return only the wish.`
     });
 
     const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: "Write the wish." }] }],
-      config: { temperature: 1.0, maxOutputTokens: 200 }
+      contents: [{ role: 'user', parts: [{ text: "Write wish." }] }],
+      config: { temperature: 1.0, maxOutputTokens: 150 }
     });
 
     return res.status(200).json({ 

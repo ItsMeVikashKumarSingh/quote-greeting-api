@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 
-export const maxDuration = 30; // Prevents Vercel from killing the task prematurely
+export const maxDuration = 30;
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,20 +10,19 @@ export default async function handler(req, res) {
     const { greetingType = 'morning' } = req.body || {};
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    // Use Flash-Lite for sub-3-second responses
     const model = ai.models.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
-      systemInstruction: "You are a direct Greeting API. Return ONLY the greeting text. No preamble, no conversational filler like 'Here are options', and no quotes."
+      model: 'gemma-3-4b-it', // Fastest high-limit model
+      systemInstruction: "You are a Greeting API. Return ONLY the greeting string. No preamble or conversational filler."
     });
 
     const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `Generate ONE short ${greetingType} greeting.` }] }],
-      config: { temperature: 1.0, maxOutputTokens: 100 } // Enough headroom to finish the phrase
+      contents: [{ role: 'user', parts: [{ text: `Short ${greetingType} greeting.` }] }],
+      config: { temperature: 1.0, maxOutputTokens: 50 }
     });
 
     return res.status(200).json({ 
-      greeting: result.response.text().trim().split('\n')[0], 
-      model: 'gemini-2.5-flash-lite' 
+      type: 'greeting', 
+      greeting: result.response.text().trim().split('\n')[0] 
     });
   } catch (error) {
     res.status(200).json({ greeting: "Good morning!", source: 'fallback' });
