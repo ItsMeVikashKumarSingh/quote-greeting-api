@@ -1,9 +1,9 @@
 {
+  "version": 2,
   "functions": {
     "api/**/*.js": {
       "memory": 2048,
-      "maxDuration": 15,
-      "runtime": "nodejs18.x"
+      "maxDuration": 15
     }
   },
   "rewrites": [
@@ -15,8 +15,9 @@
     {
       "source": "/api/(quote|greeting)",
       "headers": [
-        { "key": "Cache-Control", "value": "s-maxage=60, stale-while-revalidate" },
-        { "key": "X-API-Version", "value": "1.0.0" }
+        { "key": "Cache-Control", "value": "s-maxage=300, stale-while-revalidate" },
+        { "key": "X-API-Version", "value": "1.0.0" },
+        { "key": "X-Powered-By", "value": "Vercel + Gemini AI" }
       ]
     }
   ]
