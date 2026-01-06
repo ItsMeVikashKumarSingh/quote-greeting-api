@@ -4,21 +4,36 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
   
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'POST required' });
+    return;
+  }
+
   try {
-    const bodyString = await new Promise(resolve => {
-      let data = '';
-      req.on('data', chunk => data += chunk);
-      req.on('end', () => resolve(data));
+    // MANUAL BODY PARSING
+    let bodyString = '';
+    req.on('data', chunk => {
+      bodyString += chunk;
     });
     
-    const { greetingType = 'morning', history = [] } = JSON.parse(bodyString || '{}');
+    const body = await new Promise(resolve => {
+      req.on('end', () => {
+        try {
+          resolve(bodyString ? JSON.parse(bodyString) : {});
+        } catch {
+          resolve({});
+        }
+      });
+    });
+    
+    const { greetingType = 'morning', history = [] } = body;
     
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-2.5-flash',
       generationConfig: { 
         temperature: 1.4,
-        maxOutputTokens: 25  // Very short
+        maxOutputTokens: 25
       }
     });
 
@@ -27,9 +42,9 @@ export default async function handler(req, res) {
       contents: [{
         role: 'user',
         parts: [{
-          text: `Generate ONE SHORT ${greetingType} greeting (3-8 words only):${historyText}
+          text: `Generate ONE SHORT ${greetingType} greeting (3-8 words):${historyText}
 
-Examples: "Good morning!", "Rise and shine!", "Evening vibes!", "Sweet dreams!"
+Examples: "Good morning!", "Rise and shine!", "Evening vibes!"
 
 ONLY greeting text:`
         }]
@@ -50,6 +65,7 @@ ONLY greeting text:`
     });
     
   } catch (error) {
+    console.error('GREETING_ERROR:', error.message);
     res.status(200).json({
       type: 'greeting',
       greeting: `Good ${greetingType}!`,

@@ -2,23 +2,45 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json');
   
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'POST required' });
+    return;
+  }
+
   try {
-    const bodyString = await new Promise(resolve => {
-      let data = '';
-      req.on('data', chunk => data += chunk);
-      req.on('end', () => resolve(data));
+    // MANUAL BODY PARSING (Vercel required)
+    let bodyString = '';
+    req.on('data', chunk => {
+      bodyString += chunk;
     });
     
-    const { wishType = 'day', history = [] } = JSON.parse(bodyString || '{}');
+    const body = await new Promise(resolve => {
+      req.on('end', () => {
+        try {
+          resolve(bodyString ? JSON.parse(bodyString) : {});
+        } catch {
+          resolve({});
+        }
+      });
+    });
+    
+    const { wishType = 'day', history = [] } = body;
     
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-2.5-flash',
       generationConfig: { 
         temperature: 1.3,
-        maxOutputTokens: 35  // Wish length
+        maxOutputTokens: 35
       }
     });
 
@@ -31,8 +53,7 @@ export default async function handler(req, res) {
 
 Examples: 
 "I wish you a productive and joyful day!", 
-"May your evening bring peace and relaxation!",
-"Hope your night fills with sweet dreams!"
+"May your evening bring peace and relaxation!"
 
 ONLY wish text:`
         }]
@@ -53,10 +74,11 @@ ONLY wish text:`
     });
     
   } catch (error) {
+    console.error('WISH_ERROR:', error.message);
     res.status(200).json({
       type: 'wish',
-      wish: `I wish you a wonderful ${wishType}!`,
-      wishType,
+      wish: `I wish you a wonderful ${wishType || 'day'}!`,
+      wishType: wishType || 'day',
       timestamp: new Date().toISOString()
     });
   }
